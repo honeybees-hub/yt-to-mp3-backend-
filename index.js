@@ -25,23 +25,26 @@ app.get('/api/download', async (req, res) => {
         const stream = ytdl.exec(url, {
             extractAudio: true,
             audioFormat: format || 'mp3',
-            audioQuality: '0',
+            audioQuality: '5', // Lower quality for faster processing to avoid Vercel timeouts
             output: '-',
             ffmpegLocation: ffmpegPath,
             noCheckCertificates: true,
-            noWarnings: true,
             noPlaylist: true,
-            // Optimization: restrict headers and use a reliable User-Agent
+            // Use a very common browser-like User-Agent
             addHeader: [
-                'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-            ]
+                'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept-Language:en-US,en;q=0.9'
+            ],
+            // Add some aggressive flags to bypass blocks
+            geoBypass: true,
         }, { stdio: ['ignore', 'pipe', 'pipe'] });
 
         let headersSent = false;
+        let errorOutput = '';
 
         stream.stdout.on('data', (chunk) => {
             if (!headersSent) {
-                console.log('[BACKEND] Received first data chunk, sending headers');
+                console.log('[BACKEND] Received first data chunk, sending response headers');
                 res.header('Content-Disposition', `attachment; filename="audio.${format || 'mp3'}"`);
                 res.header('Content-Type', format === 'm4a' ? 'audio/mp4' : 'audio/mpeg');
                 headersSent = true;
@@ -50,7 +53,9 @@ app.get('/api/download', async (req, res) => {
         });
 
         stream.stderr.on('data', (data) => {
-            console.error(`[yt-dlp stderr] ${data.toString()}`);
+            const msg = data.toString();
+            errorOutput += msg;
+            console.error(`[yt-dlp stderr] ${msg}`);
         });
 
         stream.on('close', (code) => {
@@ -58,7 +63,16 @@ app.get('/api/download', async (req, res) => {
             if (headersSent) {
                 res.end();
             } else if (!res.headersSent) {
-                res.status(500).json({ error: 'Failed to extract audio. It might be a protected video or regional restriction.' });
+                // If we didn't send headers, it failed. Try to show the real error.
+                let friendlyError = 'Failed to extract audio.';
+                if (errorOutput.includes('403')) friendlyError += ' YouTube blocked the request (403 Forbidden).';
+                else if (errorOutput.includes('Sign in')) friendlyError += ' This video is age-restricted or requires login.';
+                else if (errorOutput.includes('not available')) friendlyError += ' Video is not available in the server\'s region.';
+
+                res.status(500).json({
+                    error: friendlyError,
+                    details: errorOutput.substring(0, 200) // Send a bit of the log back
+                });
             }
         });
 
