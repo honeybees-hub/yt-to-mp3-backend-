@@ -21,12 +21,6 @@ app.get('/api/download', async (req, res) => {
     try {
         console.log(`[BACKEND] Request received for: ${url} (Format: ${format})`);
 
-        // Set headers for download
-        res.header('Content-Disposition', `attachment; filename="audio.${format || 'mp3'}"`);
-        res.header('Content-Type', format === 'm4a' ? 'audio/mp4' : 'audio/mpeg');
-
-        let dataReceived = false;
-
         // Using yt-dlp-exec to stream stdout
         const stream = ytdl.exec(url, {
             extractAudio: true,
@@ -36,48 +30,49 @@ app.get('/api/download', async (req, res) => {
             ffmpegLocation: ffmpegPath,
             noCheckCertificates: true,
             noWarnings: true,
+            noPlaylist: true,
+            // Optimization: restrict headers and use a reliable User-Agent
             addHeader: [
-                'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
             ]
         }, { stdio: ['ignore', 'pipe', 'pipe'] });
 
+        let headersSent = false;
+
         stream.stdout.on('data', (chunk) => {
-            if (!dataReceived) {
-                console.log('[BACKEND] First data chunk received from yt-dlp');
-                dataReceived = true;
+            if (!headersSent) {
+                console.log('[BACKEND] Received first data chunk, sending headers');
+                res.header('Content-Disposition', `attachment; filename="audio.${format || 'mp3'}"`);
+                res.header('Content-Type', format === 'm4a' ? 'audio/mp4' : 'audio/mpeg');
+                headersSent = true;
             }
             res.write(chunk);
         });
 
         stream.stderr.on('data', (data) => {
-            const msg = data.toString();
-            console.error(`[yt-dlp stderr] ${msg}`);
+            console.error(`[yt-dlp stderr] ${data.toString()}`);
         });
 
         stream.on('close', (code) => {
-            console.log(`[BACKEND] yt-dlp process closed with code ${code}`);
-            if (code !== 0 && !dataReceived) {
-                if (!res.headersSent) {
-                    res.status(500).json({ error: 'Extraction failed. Check logs.' });
-                } else {
-                    res.end();
-                }
-            } else {
+            console.log(`[BACKEND] yt-dlp closed with code ${code}`);
+            if (headersSent) {
                 res.end();
+            } else if (!res.headersSent) {
+                res.status(500).json({ error: 'Failed to extract audio. It might be a protected video or regional restriction.' });
             }
         });
 
         stream.on('error', (err) => {
-            console.error('[BACKEND] Subprocess error:', err);
+            console.error('[BACKEND] Stream error:', err);
             if (!res.headersSent) {
-                res.status(500).json({ error: 'Process execution error' });
+                res.status(500).json({ error: 'Internal streaming error' });
             }
         });
 
     } catch (error) {
-        console.error('[BACKEND] Global catch error:', error);
+        console.error('[BACKEND] Global Error:', error);
         if (!res.headersSent) {
-            res.status(500).json({ error: 'Internal server error' });
+            res.status(500).json({ error: 'Request initialization failed' });
         }
     }
 });
