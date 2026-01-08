@@ -19,11 +19,13 @@ app.get('/api/download', async (req, res) => {
     }
 
     try {
-        console.log(`Starting download for: ${url} in format: ${format}`);
+        console.log(`[BACKEND] Request received for: ${url} (Format: ${format})`);
 
         // Set headers for download
         res.header('Content-Disposition', `attachment; filename="audio.${format || 'mp3'}"`);
         res.header('Content-Type', format === 'm4a' ? 'audio/mp4' : 'audio/mpeg');
+
+        let dataReceived = false;
 
         // Using yt-dlp-exec to stream stdout
         const stream = ytdl.exec(url, {
@@ -31,34 +33,49 @@ app.get('/api/download', async (req, res) => {
             audioFormat: format || 'mp3',
             audioQuality: '0',
             output: '-',
-            ffmpegLocation: ffmpegPath
+            ffmpegLocation: ffmpegPath,
+            noCheckCertificates: true,
+            noWarnings: true,
+            addHeader: [
+                'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
         }, { stdio: ['ignore', 'pipe', 'pipe'] });
 
-        stream.stdout.pipe(res);
+        stream.stdout.on('data', (chunk) => {
+            if (!dataReceived) {
+                console.log('[BACKEND] First data chunk received from yt-dlp');
+                dataReceived = true;
+            }
+            res.write(chunk);
+        });
 
         stream.stderr.on('data', (data) => {
-            console.error(`yt-dlp-exec stderr: ${data}`);
+            const msg = data.toString();
+            console.error(`[yt-dlp stderr] ${msg}`);
         });
 
         stream.on('close', (code) => {
-            if (code !== 0) {
-                console.error(`yt-dlp process exited with code ${code}`);
+            console.log(`[BACKEND] yt-dlp process closed with code ${code}`);
+            if (code !== 0 && !dataReceived) {
                 if (!res.headersSent) {
-                    res.status(500).json({ error: 'Failed to download audio' });
+                    res.status(500).json({ error: 'Extraction failed. Check logs.' });
+                } else {
+                    res.end();
                 }
+            } else {
+                res.end();
             }
-            console.log('Download process completed');
         });
 
         stream.on('error', (err) => {
-            console.error('Failed to start yt-dlp process:', err);
+            console.error('[BACKEND] Subprocess error:', err);
             if (!res.headersSent) {
-                res.status(500).json({ error: 'yt-dlp not found or failed to start. Please ensure yt-dlp is installed.' });
+                res.status(500).json({ error: 'Process execution error' });
             }
         });
 
     } catch (error) {
-        console.error('Error during download:', error);
+        console.error('[BACKEND] Global catch error:', error);
         if (!res.headersSent) {
             res.status(500).json({ error: 'Internal server error' });
         }
