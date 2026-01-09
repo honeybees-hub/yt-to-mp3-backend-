@@ -41,9 +41,25 @@ app.get('/api/download', async (req, res) => {
     }
 
     try {
+        // Anti-Bot improvements:
+        // - Spoof strict User-Agent
+        // - Force IPv4 to avoid some IP blocks in data centers
+        const commonArgs = [
+            '--no-warnings',
+            '--no-check-certificates',
+            '--prefer-free-formats',
+            '--geo-bypass',
+            '--force-ipv4',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        ];
+
         // Step 1: Get Video Title (Metadata)
         // We spawn yt-dlp purely to get JSON metadata first
-        const infoProc = spawn(binPath, ['--dump-single-json', '--no-warnings', videoURL]);
+        const infoProc = spawn(binPath, [
+            ...commonArgs,
+            '--dump-single-json',
+            videoURL
+        ]);
 
         let infoData = '';
         let infoError = '';
@@ -82,9 +98,9 @@ app.get('/api/download', async (req, res) => {
         res.header('Content-Type', 'audio/mpeg');
 
         const streamProc = spawn(binPath, [
+            ...commonArgs,
             '-f', 'bestaudio', // Best audio quality
             '-o', '-',         // Output to stdout
-            '--no-warnings',
             videoURL
         ]);
 
