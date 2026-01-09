@@ -4,7 +4,18 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const app = express();
-app.use(cors());
+
+// Enable CORS for ALL origins (wildcard) to prevent "Failed to fetch"
+app.use(cors({
+    origin: '*',
+    methods: ['GET'],
+    allowedHeaders: ['Content-Type']
+}));
+
+// Root Route for Health Check
+app.get('/', (req, res) => {
+    res.send('Backend is actively running! Use /api/download in your frontend.');
+});
 
 // Locate yt-dlp binary from youtube-dl-exec package
 const isWin = process.platform === "win32";
