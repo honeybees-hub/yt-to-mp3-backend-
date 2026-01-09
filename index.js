@@ -17,10 +17,20 @@ app.get('/', (req, res) => {
     res.send('Backend is actively running! Use /api/download in your frontend.');
 });
 
-// Locate yt-dlp binary from youtube-dl-exec package
+const fs = require('fs');
+
+// Locate yt-dlp binary
+// 1. Try node_modules (local dev)
+// 2. Fallback to system PATH (Docker/Prod)
 const isWin = process.platform === "win32";
 const binName = isWin ? 'yt-dlp.exe' : 'yt-dlp';
-const binPath = path.join(__dirname, 'node_modules', 'youtube-dl-exec', 'bin', binName);
+const localBinPath = path.join(__dirname, 'node_modules', 'youtube-dl-exec', 'bin', binName);
+
+let binPath = localBinPath;
+if (!isWin && !fs.existsSync(localBinPath)) {
+    console.log('Local binary not found, using system yt-dlp');
+    binPath = 'yt-dlp';
+}
 
 app.get('/api/download', async (req, res) => {
     const videoURL = req.query.url;
